@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Inspeções" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Checklist de Inspeção</title>
+  </head>
+  <body>
+    <input
+      type="file"
+      id="camera-input"
+      accept="image/*"
+      capture="environment"
+      style="display: none"
+    />
+    <input type="file" id="gallery-input" accept="image/*" multiple style="display: none" />
+
+    <div id="app">
+      <!-- ─── Home Screen ─── -->
+      <div id="home-screen" class="screen active">
+        <div class="home-icon">
+          <svg width="36" height="28" viewBox="0 0 36 28" fill="none">
+            <path
+              class="checkmark-path"
+              d="M3 14L13 24L33 4"
+              stroke="white"
+              stroke-width="5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </div>
+        <h1>CHECKLIST DE INSPEÇÃO</h1>
+        <div class="button-container">
+          <button id="new-inspection" class="btn btn-primary">+ Nova Inspeção</button>
+          <button id="history-btn" class="btn btn-secondary">Histórico</button>
+        </div>
+      </div>
+
+      <!-- ─── Posto Form Screen ─── -->
+      <div id="posto-screen" class="screen">
+        <div class="nav-bar">
+          <button class="back-btn" id="posto-back">← Voltar</button>
+          <span class="nav-title">Nova Inspeção</span>
+        </div>
+        <div class="screen-scroll">
+          <div class="form-card">
+            <form id="posto-form">
+              <div class="form-group">
+                <label class="form-label">Nome do posto</label>
+                <input
+                  class="form-input"
+                  type="text"
+                  id="posto-name"
+                  placeholder="Exemplo: Brasil 2000"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Data da inspeção</label>
+                <input class="form-input" type="date" id="posto-date" />
+              </div>
+            </form>
+          </div>
+        </div>
+        <div class="inspect-footer">
+          <button id="continue-btn" class="btn btn-primary" disabled>Continuar..</button>
+        </div>
+      </div>
+
+      <!-- ─── Inspection Screen ─── -->
+      <div id="inspect-screen" class="screen">
+        <div class="nav-bar">
+          <button class="back-btn" id="inspect-back">← Voltar</button>
+          <span class="nav-title" id="inspect-title">Nova Inspeção</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-fill"></div>
+          </div>
+          <span class="progress-label" id="progress-label">0 / 0</span>
+        </div>
+        <div class="screen-scroll" id="inspect-items"></div>
+        <div class="inspect-footer">
+          <button id="finish-inspection" class="btn btn-done">Concluir Inspeção</button>
+          <button id="export-pdf" class="btn btn-secondary is-hidden">Exportar PDF</button>
+          <span id="saved-indicator" class="saved-indicator"></span>
+        </div>
+      </div>
+
+      <!-- ─── History Screen ─── -->
+      <div id="history-screen" class="screen">
+        <div class="nav-bar">
+          <button class="back-btn" id="history-back">← Voltar</button>
+          <span class="nav-title">Histórico</span>
+        </div>
+        <div class="screen-content is-empty">Nenhuma inspeção ainda.</div>
+      </div>
+
+      <div id="toast-container"></div>
+    </div>
+    <script src="node_modules/jspdf/dist/jspdf.umd.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
