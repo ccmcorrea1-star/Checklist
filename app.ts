@@ -1,4 +1,4 @@
-enum Screen {
+enum AppScreen {
   Home = 'home-screen',
   Posto = 'posto-screen',
   Inspect = 'inspect-screen',
@@ -107,7 +107,7 @@ let currentDate = '';
 let savedInspectionId: string | null = null;
 let photoTargetId = '';
 
-function showScreen(screen: Screen): void {
+function showScreen(screen: AppScreen): void {
   document.querySelectorAll('.screen').forEach((el) => {
     el.classList.remove('active');
   });
@@ -806,7 +806,7 @@ function loadInspection(id: string): void {
   if (nameInput) nameInput.value = currentPosto;
   if (dateInput) dateInput.value = currentDate;
 
-  showScreen(Screen.Inspect);
+  showScreen(AppScreen.Inspect);
   renderInspectItems();
   updateProgress();
 
@@ -842,7 +842,7 @@ function showPostoForm(): void {
   }
   const continueBtn = document.getElementById('continue-btn') as HTMLButtonElement;
   if (continueBtn) continueBtn.disabled = true;
-  showScreen(Screen.Posto);
+  showScreen(AppScreen.Posto);
 }
 
 function showToast(message: string, duration = 2000): void {
@@ -958,7 +958,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   postoBackBtn?.addEventListener('click', () => {
-    showScreen(Screen.Home);
+    showScreen(AppScreen.Home);
   });
 
   continueBtn?.addEventListener('click', () => {
@@ -970,7 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (titleEl) {
       titleEl.textContent = currentPosto;
     }
-    showScreen(Screen.Inspect);
+    showScreen(AppScreen.Inspect);
   });
 
   const postoForm = document.getElementById('posto-form');
@@ -985,7 +985,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   historyBtn?.addEventListener('click', () => {
     renderHistory();
-    showScreen(Screen.History);
+    showScreen(AppScreen.History);
   });
 
   inspectBackBtn?.addEventListener('click', () => {
@@ -999,11 +999,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
     resetInspection();
-    showScreen(Screen.Home);
+    showScreen(AppScreen.Home);
   });
 
   historyBackBtn?.addEventListener('click', () => {
-    showScreen(Screen.Home);
+    showScreen(AppScreen.Home);
   });
 
   inspectItemsEl?.addEventListener('click', handleInspectClick);
