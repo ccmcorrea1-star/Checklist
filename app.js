@@ -82,6 +82,7 @@ let currentPosto = '';
 let currentDate = '';
 let savedInspectionId = null;
 let photoTargetId = '';
+let lastSavedSignature = null;
 function showScreen(screen) {
     document.querySelectorAll('.screen').forEach((el) => {
         el.classList.remove('active');
@@ -198,6 +199,16 @@ function statusText(status) {
     if (status === 'fail')
         return 'N\u00e3o Conforme';
     return 'Pendente';
+}
+function escapeHtml(value) {
+    const entities = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;',
+    };
+    return value.replace(/[&<>'"]/g, (character) => entities[character] ?? character);
 }
 function createGalleryItem(src, index) {
     const wrapper = document.createElement('div');
@@ -327,8 +338,7 @@ function updateProgress() {
         label.textContent = `${done} / ${total}`;
 }
 function saveToLocalStorage() {
-    const stored = localStorage.getItem('inspections');
-    const inspections = stored ? JSON.parse(stored) : [];
+    const inspections = readInspections();
     const saved = {
         id: savedInspectionId || Date.now().toString(),
         posto: currentPosto,
@@ -354,8 +364,15 @@ function saveToLocalStorage() {
     else {
         inspections.push(saved);
     }
-    localStorage.setItem('inspections', JSON.stringify(inspections));
+    try {
+        localStorage.setItem('inspections', JSON.stringify(inspections));
+    }
+    catch {
+        showToast('Não foi possível salvar. O armazenamento pode estar cheio.');
+        return;
+    }
     savedInspectionId = saved.id;
+    lastSavedSignature = getInspectionSignature();
     const exportBtn = document.getElementById('export-pdf');
     if (exportBtn) {
         exportBtn.classList.remove('is-hidden');
@@ -599,6 +616,7 @@ function resetInspection() {
     currentPosto = '';
     currentDate = '';
     savedInspectionId = null;
+    lastSavedSignature = null;
     renderInspectItems();
     updateProgress();
     const exportBtn = document.getElementById('export-pdf');
@@ -620,11 +638,14 @@ function resetInspection() {
 function deleteInspection(id) {
     if (!confirm('Excluir esta inspe\u00e7\u00e3o permanentemente?'))
         return;
-    const stored = localStorage.getItem('inspections');
-    if (!stored)
+    const inspections = readInspections();
+    try {
+        localStorage.setItem('inspections', JSON.stringify(inspections.filter((i) => i.id !== id)));
+    }
+    catch {
+        showToast('Não foi possível excluir a inspeção.');
         return;
-    const inspections = JSON.parse(stored);
-    localStorage.setItem('inspections', JSON.stringify(inspections.filter((i) => i.id !== id)));
+    }
     showToast('Inspe\u00e7\u00e3o exclu\u00edda');
     renderHistory();
 }
@@ -632,8 +653,7 @@ function renderHistory() {
     const container = document.getElementById('history-screen')?.querySelector('.screen-content');
     if (!container)
         return;
-    const stored = localStorage.getItem('inspections');
-    const inspections = stored ? JSON.parse(stored) : [];
+    const inspections = readInspections();
     if (inspections.length === 0) {
         container.className = 'screen-content is-empty';
         container.textContent = 'Nenhuma inspe\u00e7\u00e3o ainda.';
@@ -657,8 +677,8 @@ function renderHistory() {
         const yy = d.getFullYear();
         card.innerHTML = `
       <div class="history-card-header">
-        <strong>${insp.posto}</strong>
-        <small>${insp.date}</small>
+        <strong>${escapeHtml(insp.posto)}</strong>
+        <small>${escapeHtml(insp.date)}</small>
       </div>
       <div class="history-card-stats">
         <span class="stat pass">${passCount} Conforme</span>
@@ -679,10 +699,7 @@ function renderHistory() {
     }
 }
 function loadInspection(id) {
-    const stored = localStorage.getItem('inspections');
-    if (!stored)
-        return;
-    const inspections = JSON.parse(stored);
+    const inspections = readInspections();
     const insp = inspections.find((i) => i.id === id);
     if (!insp)
         return;
@@ -702,6 +719,7 @@ function loadInspection(id) {
             item.photos = savedItem.photos.slice();
         }
     }
+    lastSavedSignature = getInspectionSignature();
     const nameInput = document.getElementById('posto-name');
     const dateInput = document.getElementById('posto-date');
     if (nameInput)
@@ -743,6 +761,19 @@ function showPostoForm() {
         continueBtn.disabled = true;
     showScreen(AppScreen.Posto);
 }
+function readInspections() {
+    const stored = localStorage.getItem('inspections');
+    if (!stored)
+        return [];
+    try {
+        const parsed = JSON.parse(stored);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        showToast('O histórico está corrompido e foi ignorado.');
+        return [];
+    }
+}
 function showToast(message, duration = 2000) {
     const container = document.getElementById('toast-container');
     if (!container)
@@ -759,7 +790,19 @@ function showToast(message, duration = 2000) {
     }, duration);
 }
 function hasUnsavedChanges() {
-    return INSPECT_ITEMS.some((item) => item.status !== 'empty' || item.observation.length > 0 || item.photos.length > 0);
+    return getInspectionSignature() !== lastSavedSignature;
+}
+function getInspectionSignature() {
+    return JSON.stringify({
+        posto: currentPosto,
+        date: currentDate,
+        items: INSPECT_ITEMS.map(({ id, status, observation, photos }) => ({
+            id,
+            status,
+            observation,
+            photos,
+        })),
+    });
 }
 /* ─── Event Handlers ─── */
 function handleInspectClick(e) {
@@ -855,6 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateInput = document.getElementById('posto-date');
         currentPosto = nameInput.value.trim();
         currentDate = dateInput.value;
+        lastSavedSignature = getInspectionSignature();
         const titleEl = document.getElementById('inspect-title');
         if (titleEl) {
             titleEl.textContent = currentPosto;
@@ -907,4 +951,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     cameraInput?.addEventListener('change', handleCameraCapture);
     galleryInput?.addEventListener('change', handleGallerySelect);
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').catch(() => {
+            showToast('O modo offline não está disponível.');
+        });
+    }
 });

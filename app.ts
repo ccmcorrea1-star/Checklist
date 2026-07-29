@@ -106,6 +106,7 @@ let currentPosto = '';
 let currentDate = '';
 let savedInspectionId: string | null = null;
 let photoTargetId = '';
+let lastSavedSignature: string | null = null;
 
 function showScreen(screen: AppScreen): void {
   document.querySelectorAll('.screen').forEach((el) => {
@@ -247,6 +248,17 @@ function statusText(status: string): string {
   if (status === 'pass') return 'Conforme';
   if (status === 'fail') return 'N\u00e3o Conforme';
   return 'Pendente';
+}
+
+function escapeHtml(value: string): string {
+  const entities: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  };
+  return value.replace(/[&<>'"]/g, (character) => entities[character] ?? character);
 }
 
 function createGalleryItem(src: string, index: number): HTMLElement {
@@ -393,8 +405,7 @@ function updateProgress(): void {
 }
 
 function saveToLocalStorage(): void {
-  const stored = localStorage.getItem('inspections');
-  const inspections: SavedInspection[] = stored ? JSON.parse(stored) : [];
+  const inspections = readInspections();
 
   const saved: SavedInspection = {
     id: savedInspectionId || Date.now().toString(),
@@ -421,8 +432,14 @@ function saveToLocalStorage(): void {
     inspections.push(saved);
   }
 
-  localStorage.setItem('inspections', JSON.stringify(inspections));
+  try {
+    localStorage.setItem('inspections', JSON.stringify(inspections));
+  } catch {
+    showToast('Não foi possível salvar. O armazenamento pode estar cheio.');
+    return;
+  }
   savedInspectionId = saved.id;
+  lastSavedSignature = getInspectionSignature();
 
   const exportBtn = document.getElementById('export-pdf') as HTMLElement;
   if (exportBtn) {
@@ -711,6 +728,7 @@ function resetInspection(): void {
   currentPosto = '';
   currentDate = '';
   savedInspectionId = null;
+  lastSavedSignature = null;
   renderInspectItems();
   updateProgress();
 
@@ -735,10 +753,13 @@ function resetInspection(): void {
 
 function deleteInspection(id: string): void {
   if (!confirm('Excluir esta inspe\u00e7\u00e3o permanentemente?')) return;
-  const stored = localStorage.getItem('inspections');
-  if (!stored) return;
-  const inspections: SavedInspection[] = JSON.parse(stored);
-  localStorage.setItem('inspections', JSON.stringify(inspections.filter((i) => i.id !== id)));
+  const inspections = readInspections();
+  try {
+    localStorage.setItem('inspections', JSON.stringify(inspections.filter((i) => i.id !== id)));
+  } catch {
+    showToast('Não foi possível excluir a inspeção.');
+    return;
+  }
   showToast('Inspe\u00e7\u00e3o exclu\u00edda');
   renderHistory();
 }
@@ -747,8 +768,7 @@ function renderHistory(): void {
   const container = document.getElementById('history-screen')?.querySelector('.screen-content');
   if (!container) return;
 
-  const stored = localStorage.getItem('inspections');
-  const inspections: SavedInspection[] = stored ? JSON.parse(stored) : [];
+  const inspections = readInspections();
 
   if (inspections.length === 0) {
     container.className = 'screen-content is-empty';
@@ -779,8 +799,8 @@ function renderHistory(): void {
 
     card.innerHTML = `
       <div class="history-card-header">
-        <strong>${insp.posto}</strong>
-        <small>${insp.date}</small>
+        <strong>${escapeHtml(insp.posto)}</strong>
+        <small>${escapeHtml(insp.date)}</small>
       </div>
       <div class="history-card-stats">
         <span class="stat pass">${passCount} Conforme</span>
@@ -805,9 +825,7 @@ function renderHistory(): void {
 }
 
 function loadInspection(id: string): void {
-  const stored = localStorage.getItem('inspections');
-  if (!stored) return;
-  const inspections: SavedInspection[] = JSON.parse(stored);
+  const inspections = readInspections();
   const insp = inspections.find((i) => i.id === id);
   if (!insp) return;
 
@@ -829,6 +847,8 @@ function loadInspection(id: string): void {
       item.photos = savedItem.photos.slice();
     }
   }
+
+  lastSavedSignature = getInspectionSignature();
 
   const nameInput = document.getElementById('posto-name') as HTMLInputElement;
   const dateInput = document.getElementById('posto-date') as HTMLInputElement;
@@ -874,6 +894,19 @@ function showPostoForm(): void {
   showScreen(AppScreen.Posto);
 }
 
+function readInspections(): SavedInspection[] {
+  const stored = localStorage.getItem('inspections');
+  if (!stored) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return Array.isArray(parsed) ? (parsed as SavedInspection[]) : [];
+  } catch {
+    showToast('O histórico está corrompido e foi ignorado.');
+    return [];
+  }
+}
+
 function showToast(message: string, duration = 2000): void {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -892,9 +925,20 @@ function showToast(message: string, duration = 2000): void {
 }
 
 function hasUnsavedChanges(): boolean {
-  return INSPECT_ITEMS.some(
-    (item) => item.status !== 'empty' || item.observation.length > 0 || item.photos.length > 0,
-  );
+  return getInspectionSignature() !== lastSavedSignature;
+}
+
+function getInspectionSignature(): string {
+  return JSON.stringify({
+    posto: currentPosto,
+    date: currentDate,
+    items: INSPECT_ITEMS.map(({ id, status, observation, photos }) => ({
+      id,
+      status,
+      observation,
+      photos,
+    })),
+  });
 }
 
 /* ─── Event Handlers ─── */
@@ -995,6 +1039,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateInput = document.getElementById('posto-date') as HTMLInputElement;
     currentPosto = nameInput.value.trim();
     currentDate = dateInput.value;
+    lastSavedSignature = getInspectionSignature();
     const titleEl = document.getElementById('inspect-title');
     if (titleEl) {
       titleEl.textContent = currentPosto;
@@ -1064,4 +1109,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   cameraInput?.addEventListener('change', handleCameraCapture);
   galleryInput?.addEventListener('change', handleGallerySelect);
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      showToast('O modo offline não está disponível.');
+    });
+  }
 });

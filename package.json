@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "lint": "eslint app.ts app.js",
+    "lint": "eslint app.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
