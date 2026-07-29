@@ -686,16 +686,9 @@ async function exportPDF(): Promise<void> {
       await navigator.share({ files: [new File([blob], filename, { type: 'application/pdf' })] });
       return;
     } catch {
-      // user cancelled share sheet, fall through
+      // user cancelled share sheet, fall through to save
     }
   }
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
 
   doc.save(filename);
 }
