@@ -1,14 +1,14 @@
 const CACHE_NAME = 'inspection-checklist-v1';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/styles.css',
-  '/app.js',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/apple-touch-icon.png',
-  '/node_modules/jspdf/dist/jspdf.umd.min.js',
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png',
+  './node_modules/jspdf/dist/jspdf.umd.min.js',
 ];
 
 self.addEventListener('install', (event) => {
