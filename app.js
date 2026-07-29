@@ -569,7 +569,23 @@ async function exportPDF() {
     doc.setTextColor(153, 153, 153);
     doc.text(`Pendente: ${pendCount}`, margin + 136, y);
     addFooter();
-    doc.save(`relatorio-inspecao-${currentPosto.replace(/[^a-z0-9]/gi, '-')}.pdf`);
+    const blob = doc.output('blob');
+    const filename = `relatorio-inspecao-${currentPosto.replace(/[^a-z0-9]/gi, '-')}.pdf`;
+    if (navigator.canShare?.({ files: [new File([blob], filename, { type: 'application/pdf' })] })) {
+        try {
+            await navigator.share({ files: [new File([blob], filename, { type: 'application/pdf' })] });
+            return;
+        }
+        catch {
+            // user cancelled share sheet, fall through
+        }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 function cleanupPhotos() {
     for (const item of INSPECT_ITEMS) {
