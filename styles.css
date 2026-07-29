@@ -281,7 +281,6 @@ h1 {
   color: var(--system-label);
   background: none;
   border: none;
-  outline: none;
   padding: 4px 0;
   -webkit-appearance: none;
   appearance: none;
@@ -704,6 +703,20 @@ h1 {
   padding-bottom: 100px;
 }
 
+.history-card:focus-visible,
+.btn:focus-visible,
+.back-btn:focus-visible,
+.accordion-header:focus-visible,
+.status-btn:focus-visible,
+.photo-btn:focus-visible,
+.photo-remove:focus-visible,
+.delete-btn:focus-visible,
+.obs-input:focus-visible,
+.form-input:focus-visible {
+  outline: 3px solid rgba(0, 122, 255, 0.45);
+  outline-offset: 2px;
+}
+
 /* ─── History ─── */
 
 .history-card {
@@ -730,6 +743,8 @@ h1 {
 .history-card-header strong {
   font-size: 16px;
   color: var(--system-label);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .history-card-header small {
@@ -739,6 +754,7 @@ h1 {
 
 .history-card-stats {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 6px;
 }
@@ -768,7 +784,7 @@ h1 {
 
 .history-card-footer small {
   font-size: 11px;
-  color: #aaa;
+  color: var(--system-secondary-label);
 }
 
 .delete-btn {

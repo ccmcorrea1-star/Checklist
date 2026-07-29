@@ -31,12 +31,18 @@ interface StoredInspection extends Omit<SavedInspection, 'items'> {
   items: Array<Omit<SavedInspection['items'][number], 'photos'> & { photos: Blob[] }>;
 }
 
+interface StoredDraft extends StoredInspection {
+  draftForId: string | null;
+}
+
 const DB_NAME = 'inspection-checklist';
 const DB_VERSION = 1;
 const INSPECTIONS_STORE = 'inspections';
 const LEGACY_STORAGE_KEY = 'inspections';
+const DRAFT_ID = '__current_draft__';
 let databasePromise: Promise<IDBDatabase> | null = null;
 let storageReady: Promise<void> = Promise.resolve();
+let draftSaveTimer: number | null = null;
 
 const INSPECT_ITEMS: InspectItemData[] = [
   {
@@ -196,11 +202,13 @@ function renderInspectItems(): void {
     const conformBtn = document.createElement('button');
     conformBtn.className = `status-btn${item.status === 'pass' ? ' is-pass' : ''}`;
     conformBtn.dataset.status = 'pass';
+    conformBtn.setAttribute('aria-pressed', String(item.status === 'pass'));
     conformBtn.textContent = 'Conforme';
 
     const naoBtn = document.createElement('button');
     naoBtn.className = `status-btn${item.status === 'fail' ? ' is-fail' : ''}`;
     naoBtn.dataset.status = 'fail';
+    naoBtn.setAttribute('aria-pressed', String(item.status === 'fail'));
     naoBtn.textContent = 'N\u00e3o Conforme';
 
     statusRow.appendChild(conformBtn);
@@ -214,9 +222,11 @@ function renderInspectItems(): void {
     obsLabel.textContent = 'OBSERVA\u00c7\u00c3O';
 
     const obsInput = document.createElement('textarea');
+    obsInput.id = `observation-${item.id}`;
     obsInput.className = 'obs-input';
     obsInput.placeholder = 'Descreva qualquer observa\u00e7\u00e3o...';
     obsInput.value = item.observation;
+    obsLabel.setAttribute('for', obsInput.id);
 
     obsGroup.appendChild(obsLabel);
     obsGroup.appendChild(obsInput);
@@ -290,6 +300,7 @@ function createGalleryItem(src: string, index: number): HTMLElement {
   removeBtn.className = 'photo-remove';
   removeBtn.dataset.action = 'remove-photo';
   removeBtn.textContent = '\u00D7';
+  removeBtn.setAttribute('aria-label', 'Remover foto');
 
   wrapper.appendChild(img);
   wrapper.appendChild(removeBtn);
@@ -353,6 +364,8 @@ function setItemStatus(id: string, value: 'pass' | 'fail'): void {
   const naoBtn = card.querySelector('[data-status="fail"]') as HTMLElement;
   conformBtn.classList.remove('is-pass', 'is-fail');
   naoBtn.classList.remove('is-pass', 'is-fail');
+  conformBtn.setAttribute('aria-pressed', String(value === 'pass'));
+  naoBtn.setAttribute('aria-pressed', String(value === 'fail'));
 
   if (value === 'pass') {
     conformBtn.classList.add('is-pass');
@@ -361,6 +374,7 @@ function setItemStatus(id: string, value: 'pass' | 'fail'): void {
   }
 
   updateProgress();
+  scheduleDraftSave();
 }
 
 function triggerCamera(itemId: string): void {
@@ -390,6 +404,7 @@ async function addPhotos(itemId: string, files: FileList): Promise<void> {
     }
   }
   renderGallery(itemId);
+  scheduleDraftSave();
 }
 
 function renderGallery(itemId: string): void {
@@ -415,6 +430,7 @@ function removePhoto(itemId: string, index: number): void {
 
   item.photos.splice(index, 1);
   renderGallery(itemId);
+  scheduleDraftSave();
 }
 
 function updateProgress(): void {
@@ -425,7 +441,10 @@ function updateProgress(): void {
   const fill = document.getElementById('progress-fill');
   const label = document.getElementById('progress-label');
 
-  if (fill) fill.style.width = `${pct}%`;
+  if (fill) {
+    fill.style.width = `${pct}%`;
+    fill.parentElement?.setAttribute('aria-valuenow', String(done));
+  }
   if (label) label.textContent = `${done} / ${total}`;
 }
 
@@ -526,19 +545,22 @@ function toStoredInspection(inspection: SavedInspection): StoredInspection {
   };
 }
 
-async function fromStoredInspection(inspection: StoredInspection): Promise<SavedInspection> {
+async function fromStoredInspection(
+  inspection: StoredInspection,
+  includePhotos = true,
+): Promise<SavedInspection> {
   return {
     ...inspection,
     items: await Promise.all(
       inspection.items.map(async (item) => ({
         ...item,
-        photos: await Promise.all(item.photos.map(blobToDataUrl)),
+        photos: includePhotos ? await Promise.all(item.photos.map(blobToDataUrl)) : [],
       })),
     ),
   };
 }
 
-async function getStoredInspections(): Promise<SavedInspection[]> {
+async function getStoredInspections(includePhotos = true): Promise<SavedInspection[]> {
   const db = await openDatabase();
   const stored = await new Promise<StoredInspection[]>((resolve, reject) => {
     const transaction = db.transaction(INSPECTIONS_STORE, 'readonly');
@@ -547,8 +569,33 @@ async function getStoredInspections(): Promise<SavedInspection[]> {
     request.onerror = () => reject(request.error);
   });
 
-  const converted = await Promise.all(stored.filter(isStoredInspection).map(fromStoredInspection));
+  const converted = await Promise.all(
+    stored
+      .filter((inspection) => inspection.id !== DRAFT_ID)
+      .filter(isStoredInspection)
+      .map((inspection) => fromStoredInspection(inspection, includePhotos)),
+  );
   return converted.filter(isSavedInspection);
+}
+
+function isStoredDraft(value: unknown): value is StoredDraft {
+  if (!isStoredInspection(value)) return false;
+  const draft = value as Partial<StoredDraft>;
+  return (
+    draft.id === DRAFT_ID && (draft.draftForId === null || typeof draft.draftForId === 'string')
+  );
+}
+
+async function getStoredDraft(): Promise<StoredDraft | null> {
+  const db = await openDatabase();
+  return new Promise<StoredDraft | null>((resolve, reject) => {
+    const request = db
+      .transaction(INSPECTIONS_STORE, 'readonly')
+      .objectStore(INSPECTIONS_STORE)
+      .get(DRAFT_ID);
+    request.onsuccess = () => resolve(isStoredDraft(request.result) ? request.result : null);
+    request.onerror = () => reject(request.error);
+  });
 }
 
 async function putStoredInspection(inspection: SavedInspection): Promise<void> {
@@ -600,9 +647,9 @@ async function initializeStorage(): Promise<void> {
   }
 }
 
-async function saveToLocalStorage(): Promise<boolean> {
-  const saved: SavedInspection = {
-    id: savedInspectionId || Date.now().toString(),
+function buildInspection(id: string, completedAt = new Date().toISOString()): SavedInspection {
+  return {
+    id,
     posto: currentPosto,
     date: currentDate,
     items: INSPECT_ITEMS.map((item) => ({
@@ -612,11 +659,16 @@ async function saveToLocalStorage(): Promise<boolean> {
       observation: item.observation,
       photos: item.photos.slice(),
     })),
-    completedAt: new Date().toISOString(),
+    completedAt,
   };
+}
+
+async function saveInspection(): Promise<boolean> {
+  const saved = buildInspection(savedInspectionId || Date.now().toString());
 
   try {
     await putStoredInspection(saved);
+    await deleteStoredInspection(DRAFT_ID);
   } catch {
     showToast('Não foi possível salvar. O armazenamento pode estar cheio.');
     return false;
@@ -639,6 +691,55 @@ async function saveToLocalStorage(): Promise<boolean> {
     indicator.classList.add('is-visible');
   }
   return true;
+}
+
+async function saveDraft(): Promise<void> {
+  if (!currentPosto || !currentDate) return;
+
+  const draft = buildInspection(DRAFT_ID);
+  const storedDraft: StoredDraft = {
+    ...toStoredInspection(draft),
+    draftForId: savedInspectionId,
+  };
+
+  try {
+    const db = await openDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(INSPECTIONS_STORE, 'readwrite');
+      transaction.objectStore(INSPECTIONS_STORE).put(storedDraft);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } catch {
+    showToast('Não foi possível salvar o rascunho offline.');
+  }
+}
+
+function scheduleDraftSave(): void {
+  if (draftSaveTimer !== null) window.clearTimeout(draftSaveTimer);
+  draftSaveTimer = window.setTimeout(() => {
+    draftSaveTimer = null;
+    void saveDraft();
+  }, 500);
+}
+
+async function restoreDraft(): Promise<void> {
+  const draft = await getStoredDraft();
+  if (!draft) return;
+
+  const restored = await fromStoredInspection(draft);
+  currentPosto = restored.posto;
+  currentDate = restored.date;
+  savedInspectionId = draft.draftForId;
+  lastSavedSignature = draft.draftForId ? getInspectionSignature() : null;
+
+  for (const item of INSPECT_ITEMS) {
+    const savedItem = restored.items.find((candidate) => candidate.id === item.id);
+    item.status = savedItem?.status ?? 'empty';
+    item.observation = savedItem?.observation ?? '';
+    item.photos = savedItem?.photos.slice() ?? [];
+  }
 }
 
 function loadImage(url: string): Promise<HTMLImageElement | null> {
@@ -905,6 +1006,7 @@ function cleanupPhotos(): void {
 }
 
 function resetInspection(): void {
+  void deleteStoredInspection(DRAFT_ID);
   cleanupPhotos();
   for (const item of INSPECT_ITEMS) {
     item.status = 'empty';
@@ -953,7 +1055,7 @@ async function renderHistory(): Promise<void> {
 
   let inspections: SavedInspection[];
   try {
-    inspections = await getStoredInspections();
+    inspections = await getStoredInspections(false);
   } catch {
     container.className = 'screen-content is-empty';
     container.textContent = 'N\u00e3o foi poss\u00edvel carregar o hist\u00f3rico offline.';
@@ -975,6 +1077,9 @@ async function renderHistory(): Promise<void> {
     const card = document.createElement('div');
     card.className = 'history-card';
     card.dataset.id = insp.id;
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `Abrir inspeção de ${insp.posto}`);
 
     const passCount = insp.items.filter((i) => i.status === 'pass').length;
     const failCount = insp.items.filter((i) => i.status === 'fail').length;
@@ -1009,6 +1114,12 @@ async function renderHistory(): Promise<void> {
     });
 
     card.addEventListener('click', () => void loadInspection(insp.id));
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        void loadInspection(insp.id);
+      }
+    });
 
     container.appendChild(card);
   }
@@ -1174,6 +1285,7 @@ function handleObservationChange(e: Event): void {
   if (!itemId) return;
   const item = INSPECT_ITEMS.find((i) => i.id === itemId);
   if (item) item.observation = textarea.value;
+  scheduleDraftSave();
 }
 
 async function handleCameraCapture(e: Event): Promise<void> {
@@ -1193,8 +1305,25 @@ async function handleGallerySelect(e: Event): Promise<void> {
 /* ─── Init ─── */
 
 document.addEventListener('DOMContentLoaded', () => {
-  storageReady = initializeStorage();
-  renderInspectItems();
+  storageReady = initializeStorage().then(async () => {
+    try {
+      await restoreDraft();
+    } catch {
+      showToast('Não foi possível restaurar o rascunho offline.');
+    }
+    renderInspectItems();
+
+    if (currentPosto && currentDate) {
+      const nameInput = document.getElementById('posto-name') as HTMLInputElement;
+      const dateInput = document.getElementById('posto-date') as HTMLInputElement;
+      if (nameInput) nameInput.value = currentPosto;
+      if (dateInput) dateInput.value = currentDate;
+      const titleEl = document.getElementById('inspect-title');
+      if (titleEl) titleEl.textContent = currentPosto;
+      showScreen(AppScreen.Inspect);
+      showToast('Rascunho restaurado.');
+    }
+  });
 
   const newInspectionBtn = document.getElementById('new-inspection');
   const historyBtn = document.getElementById('history-btn');
@@ -1225,7 +1354,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateInput = document.getElementById('posto-date') as HTMLInputElement;
     currentPosto = nameInput.value.trim();
     currentDate = dateInput.value;
-    lastSavedSignature = getInspectionSignature();
+    lastSavedSignature = null;
+    scheduleDraftSave();
     const titleEl = document.getElementById('inspect-title');
     if (titleEl) {
       titleEl.textContent = currentPosto;
@@ -1272,7 +1402,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   finishBtn?.addEventListener('click', async () => {
     finishBtn.disabled = true;
-    const saved = await saveToLocalStorage();
+    const saved = await saveInspection();
     finishBtn.disabled = false;
     if (!saved) return;
 
@@ -1283,7 +1413,17 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast('Inspe\u00e7\u00e3o salva com sucesso!');
   });
 
-  exportBtn?.addEventListener('click', exportPDF);
+  exportBtn?.addEventListener('click', async () => {
+    const button = exportBtn as HTMLButtonElement;
+    button.disabled = true;
+    try {
+      await exportPDF();
+    } catch {
+      showToast('Não foi possível exportar o PDF.');
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   appEl?.addEventListener('touchstart', (e) => {
     if (

@@ -10,8 +10,10 @@ const DB_NAME = 'inspection-checklist';
 const DB_VERSION = 1;
 const INSPECTIONS_STORE = 'inspections';
 const LEGACY_STORAGE_KEY = 'inspections';
+const DRAFT_ID = '__current_draft__';
 let databasePromise = null;
 let storageReady = Promise.resolve();
+let draftSaveTimer = null;
 const INSPECT_ITEMS = [
     {
         id: 'areia',
@@ -156,10 +158,12 @@ function renderInspectItems() {
         const conformBtn = document.createElement('button');
         conformBtn.className = `status-btn${item.status === 'pass' ? ' is-pass' : ''}`;
         conformBtn.dataset.status = 'pass';
+        conformBtn.setAttribute('aria-pressed', String(item.status === 'pass'));
         conformBtn.textContent = 'Conforme';
         const naoBtn = document.createElement('button');
         naoBtn.className = `status-btn${item.status === 'fail' ? ' is-fail' : ''}`;
         naoBtn.dataset.status = 'fail';
+        naoBtn.setAttribute('aria-pressed', String(item.status === 'fail'));
         naoBtn.textContent = 'N\u00e3o Conforme';
         statusRow.appendChild(conformBtn);
         statusRow.appendChild(naoBtn);
@@ -169,9 +173,11 @@ function renderInspectItems() {
         obsLabel.className = 'obs-label';
         obsLabel.textContent = 'OBSERVA\u00c7\u00c3O';
         const obsInput = document.createElement('textarea');
+        obsInput.id = `observation-${item.id}`;
         obsInput.className = 'obs-input';
         obsInput.placeholder = 'Descreva qualquer observa\u00e7\u00e3o...';
         obsInput.value = item.observation;
+        obsLabel.setAttribute('for', obsInput.id);
         obsGroup.appendChild(obsLabel);
         obsGroup.appendChild(obsInput);
         const photoActions = document.createElement('div');
@@ -232,6 +238,7 @@ function createGalleryItem(src, index) {
     removeBtn.className = 'photo-remove';
     removeBtn.dataset.action = 'remove-photo';
     removeBtn.textContent = '\u00D7';
+    removeBtn.setAttribute('aria-label', 'Remover foto');
     wrapper.appendChild(img);
     wrapper.appendChild(removeBtn);
     return wrapper;
@@ -283,6 +290,8 @@ function setItemStatus(id, value) {
     const naoBtn = card.querySelector('[data-status="fail"]');
     conformBtn.classList.remove('is-pass', 'is-fail');
     naoBtn.classList.remove('is-pass', 'is-fail');
+    conformBtn.setAttribute('aria-pressed', String(value === 'pass'));
+    naoBtn.setAttribute('aria-pressed', String(value === 'fail'));
     if (value === 'pass') {
         conformBtn.classList.add('is-pass');
     }
@@ -290,6 +299,7 @@ function setItemStatus(id, value) {
         naoBtn.classList.add('is-fail');
     }
     updateProgress();
+    scheduleDraftSave();
 }
 function triggerCamera(itemId) {
     photoTargetId = itemId;
@@ -316,6 +326,7 @@ async function addPhotos(itemId, files) {
         }
     }
     renderGallery(itemId);
+    scheduleDraftSave();
 }
 function renderGallery(itemId) {
     const gallery = document.getElementById(`photo-gallery-${itemId}`);
@@ -340,6 +351,7 @@ function removePhoto(itemId, index) {
         return;
     item.photos.splice(index, 1);
     renderGallery(itemId);
+    scheduleDraftSave();
 }
 function updateProgress() {
     const total = INSPECT_ITEMS.length;
@@ -347,8 +359,10 @@ function updateProgress() {
     const pct = total > 0 ? (done / total) * 100 : 0;
     const fill = document.getElementById('progress-fill');
     const label = document.getElementById('progress-label');
-    if (fill)
+    if (fill) {
         fill.style.width = `${pct}%`;
+        fill.parentElement?.setAttribute('aria-valuenow', String(done));
+    }
     if (label)
         label.textContent = `${done} / ${total}`;
 }
@@ -436,16 +450,16 @@ function toStoredInspection(inspection) {
         })),
     };
 }
-async function fromStoredInspection(inspection) {
+async function fromStoredInspection(inspection, includePhotos = true) {
     return {
         ...inspection,
         items: await Promise.all(inspection.items.map(async (item) => ({
             ...item,
-            photos: await Promise.all(item.photos.map(blobToDataUrl)),
+            photos: includePhotos ? await Promise.all(item.photos.map(blobToDataUrl)) : [],
         }))),
     };
 }
-async function getStoredInspections() {
+async function getStoredInspections(includePhotos = true) {
     const db = await openDatabase();
     const stored = await new Promise((resolve, reject) => {
         const transaction = db.transaction(INSPECTIONS_STORE, 'readonly');
@@ -453,8 +467,28 @@ async function getStoredInspections() {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
     });
-    const converted = await Promise.all(stored.filter(isStoredInspection).map(fromStoredInspection));
+    const converted = await Promise.all(stored
+        .filter((inspection) => inspection.id !== DRAFT_ID)
+        .filter(isStoredInspection)
+        .map((inspection) => fromStoredInspection(inspection, includePhotos)));
     return converted.filter(isSavedInspection);
+}
+function isStoredDraft(value) {
+    if (!isStoredInspection(value))
+        return false;
+    const draft = value;
+    return (draft.id === DRAFT_ID && (draft.draftForId === null || typeof draft.draftForId === 'string'));
+}
+async function getStoredDraft() {
+    const db = await openDatabase();
+    return new Promise((resolve, reject) => {
+        const request = db
+            .transaction(INSPECTIONS_STORE, 'readonly')
+            .objectStore(INSPECTIONS_STORE)
+            .get(DRAFT_ID);
+        request.onsuccess = () => resolve(isStoredDraft(request.result) ? request.result : null);
+        request.onerror = () => reject(request.error);
+    });
 }
 async function putStoredInspection(inspection) {
     const db = await openDatabase();
@@ -504,9 +538,9 @@ async function initializeStorage() {
         showToast('Não foi possível inicializar o armazenamento offline.');
     }
 }
-async function saveToLocalStorage() {
-    const saved = {
-        id: savedInspectionId || Date.now().toString(),
+function buildInspection(id, completedAt = new Date().toISOString()) {
+    return {
+        id,
         posto: currentPosto,
         date: currentDate,
         items: INSPECT_ITEMS.map((item) => ({
@@ -516,10 +550,14 @@ async function saveToLocalStorage() {
             observation: item.observation,
             photos: item.photos.slice(),
         })),
-        completedAt: new Date().toISOString(),
+        completedAt,
     };
+}
+async function saveInspection() {
+    const saved = buildInspection(savedInspectionId || Date.now().toString());
     try {
         await putStoredInspection(saved);
+        await deleteStoredInspection(DRAFT_ID);
     }
     catch {
         showToast('Não foi possível salvar. O armazenamento pode estar cheio.');
@@ -541,6 +579,52 @@ async function saveToLocalStorage() {
         indicator.classList.add('is-visible');
     }
     return true;
+}
+async function saveDraft() {
+    if (!currentPosto || !currentDate)
+        return;
+    const draft = buildInspection(DRAFT_ID);
+    const storedDraft = {
+        ...toStoredInspection(draft),
+        draftForId: savedInspectionId,
+    };
+    try {
+        const db = await openDatabase();
+        await new Promise((resolve, reject) => {
+            const transaction = db.transaction(INSPECTIONS_STORE, 'readwrite');
+            transaction.objectStore(INSPECTIONS_STORE).put(storedDraft);
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+            transaction.onabort = () => reject(transaction.error);
+        });
+    }
+    catch {
+        showToast('Não foi possível salvar o rascunho offline.');
+    }
+}
+function scheduleDraftSave() {
+    if (draftSaveTimer !== null)
+        window.clearTimeout(draftSaveTimer);
+    draftSaveTimer = window.setTimeout(() => {
+        draftSaveTimer = null;
+        void saveDraft();
+    }, 500);
+}
+async function restoreDraft() {
+    const draft = await getStoredDraft();
+    if (!draft)
+        return;
+    const restored = await fromStoredInspection(draft);
+    currentPosto = restored.posto;
+    currentDate = restored.date;
+    savedInspectionId = draft.draftForId;
+    lastSavedSignature = draft.draftForId ? getInspectionSignature() : null;
+    for (const item of INSPECT_ITEMS) {
+        const savedItem = restored.items.find((candidate) => candidate.id === item.id);
+        item.status = savedItem?.status ?? 'empty';
+        item.observation = savedItem?.observation ?? '';
+        item.photos = savedItem?.photos.slice() ?? [];
+    }
 }
 function loadImage(url) {
     return new Promise((resolve) => {
@@ -764,6 +848,7 @@ function cleanupPhotos() {
     }
 }
 function resetInspection() {
+    void deleteStoredInspection(DRAFT_ID);
     cleanupPhotos();
     for (const item of INSPECT_ITEMS) {
         item.status = 'empty';
@@ -809,7 +894,7 @@ async function renderHistory() {
         return;
     let inspections;
     try {
-        inspections = await getStoredInspections();
+        inspections = await getStoredInspections(false);
     }
     catch {
         container.className = 'screen-content is-empty';
@@ -828,6 +913,9 @@ async function renderHistory() {
         const card = document.createElement('div');
         card.className = 'history-card';
         card.dataset.id = insp.id;
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.setAttribute('aria-label', `Abrir inspeção de ${insp.posto}`);
         const passCount = insp.items.filter((i) => i.status === 'pass').length;
         const failCount = insp.items.filter((i) => i.status === 'fail').length;
         const pendCount = insp.items.length - passCount - failCount;
@@ -857,6 +945,12 @@ async function renderHistory() {
             void deleteInspection(insp.id);
         });
         card.addEventListener('click', () => void loadInspection(insp.id));
+        card.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                void loadInspection(insp.id);
+            }
+        });
         container.appendChild(card);
     }
 }
@@ -1012,6 +1106,7 @@ function handleObservationChange(e) {
     const item = INSPECT_ITEMS.find((i) => i.id === itemId);
     if (item)
         item.observation = textarea.value;
+    scheduleDraftSave();
 }
 async function handleCameraCapture(e) {
     const input = e.target;
@@ -1029,8 +1124,28 @@ async function handleGallerySelect(e) {
 }
 /* ─── Init ─── */
 document.addEventListener('DOMContentLoaded', () => {
-    storageReady = initializeStorage();
-    renderInspectItems();
+    storageReady = initializeStorage().then(async () => {
+        try {
+            await restoreDraft();
+        }
+        catch {
+            showToast('Não foi possível restaurar o rascunho offline.');
+        }
+        renderInspectItems();
+        if (currentPosto && currentDate) {
+            const nameInput = document.getElementById('posto-name');
+            const dateInput = document.getElementById('posto-date');
+            if (nameInput)
+                nameInput.value = currentPosto;
+            if (dateInput)
+                dateInput.value = currentDate;
+            const titleEl = document.getElementById('inspect-title');
+            if (titleEl)
+                titleEl.textContent = currentPosto;
+            showScreen(AppScreen.Inspect);
+            showToast('Rascunho restaurado.');
+        }
+    });
     const newInspectionBtn = document.getElementById('new-inspection');
     const historyBtn = document.getElementById('history-btn');
     const postoBackBtn = document.getElementById('posto-back');
@@ -1057,7 +1172,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateInput = document.getElementById('posto-date');
         currentPosto = nameInput.value.trim();
         currentDate = dateInput.value;
-        lastSavedSignature = getInspectionSignature();
+        lastSavedSignature = null;
+        scheduleDraftSave();
         const titleEl = document.getElementById('inspect-title');
         if (titleEl) {
             titleEl.textContent = currentPosto;
@@ -1094,7 +1210,7 @@ document.addEventListener('DOMContentLoaded', () => {
     inspectItemsEl?.addEventListener('input', handleObservationChange);
     finishBtn?.addEventListener('click', async () => {
         finishBtn.disabled = true;
-        const saved = await saveToLocalStorage();
+        const saved = await saveInspection();
         finishBtn.disabled = false;
         if (!saved)
             return;
@@ -1103,7 +1219,19 @@ document.addEventListener('DOMContentLoaded', () => {
         finishBtn.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.12)';
         showToast('Inspe\u00e7\u00e3o salva com sucesso!');
     });
-    exportBtn?.addEventListener('click', exportPDF);
+    exportBtn?.addEventListener('click', async () => {
+        const button = exportBtn;
+        button.disabled = true;
+        try {
+            await exportPDF();
+        }
+        catch {
+            showToast('Não foi possível exportar o PDF.');
+        }
+        finally {
+            button.disabled = false;
+        }
+    });
     appEl?.addEventListener('touchstart', (e) => {
         if (document.activeElement &&
             (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
