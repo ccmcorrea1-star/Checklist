@@ -22,7 +22,7 @@ interface SavedInspection {
     label: string;
     status: 'empty' | 'pass' | 'fail';
     observation: string;
-    photoCount: number;
+    photos: string[];
   }>;
   completedAt: string;
 }
@@ -340,13 +340,17 @@ function triggerGallery(itemId: string): void {
   input.click();
 }
 
-function addPhotos(itemId: string, files: FileList): void {
+async function addPhotos(itemId: string, files: FileList): Promise<void> {
   const item = INSPECT_ITEMS.find((i) => i.id === itemId);
   if (!item) return;
 
   for (let i = 0; i < files.length; i++) {
     const url = URL.createObjectURL(files[i]);
-    item.photos.push(url);
+    const img = await loadImage(url);
+    URL.revokeObjectURL(url);
+    if (img) {
+      item.photos.push(imgToBase64(img));
+    }
   }
   renderGallery(itemId);
 }
@@ -372,7 +376,6 @@ function removePhoto(itemId: string, index: number): void {
   const item = INSPECT_ITEMS.find((i) => i.id === itemId);
   if (!item) return;
 
-  URL.revokeObjectURL(item.photos[index]);
   item.photos.splice(index, 1);
   renderGallery(itemId);
 }
@@ -402,7 +405,7 @@ function saveToLocalStorage(): void {
       label: item.label,
       status: item.status,
       observation: item.observation,
-      photoCount: item.photos.length,
+      photos: item.photos.slice(),
     })),
     completedAt: new Date().toISOString(),
   };
@@ -695,9 +698,6 @@ async function exportPDF(): Promise<void> {
 
 function cleanupPhotos(): void {
   for (const item of INSPECT_ITEMS) {
-    for (const url of item.photos) {
-      URL.revokeObjectURL(url);
-    }
     item.photos = [];
     item.observation = '';
   }
@@ -826,6 +826,7 @@ function loadInspection(id: string): void {
     if (item) {
       item.status = savedItem.status;
       item.observation = savedItem.observation;
+      item.photos = savedItem.photos.slice();
     }
   }
 
@@ -946,17 +947,17 @@ function handleObservationChange(e: Event): void {
   if (item) item.observation = textarea.value;
 }
 
-function handleCameraCapture(e: Event): void {
+async function handleCameraCapture(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
   if (!input.files || !input.files.length) return;
-  addPhotos(photoTargetId, input.files);
+  await addPhotos(photoTargetId, input.files);
   input.value = '';
 }
 
-function handleGallerySelect(e: Event): void {
+async function handleGallerySelect(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
   if (!input.files || !input.files.length) return;
-  addPhotos(photoTargetId, input.files);
+  await addPhotos(photoTargetId, input.files);
   input.value = '';
 }
 

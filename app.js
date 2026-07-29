@@ -277,13 +277,17 @@ function triggerGallery(itemId) {
     input.value = '';
     input.click();
 }
-function addPhotos(itemId, files) {
+async function addPhotos(itemId, files) {
     const item = INSPECT_ITEMS.find((i) => i.id === itemId);
     if (!item)
         return;
     for (let i = 0; i < files.length; i++) {
         const url = URL.createObjectURL(files[i]);
-        item.photos.push(url);
+        const img = await loadImage(url);
+        URL.revokeObjectURL(url);
+        if (img) {
+            item.photos.push(imgToBase64(img));
+        }
     }
     renderGallery(itemId);
 }
@@ -308,7 +312,6 @@ function removePhoto(itemId, index) {
     const item = INSPECT_ITEMS.find((i) => i.id === itemId);
     if (!item)
         return;
-    URL.revokeObjectURL(item.photos[index]);
     item.photos.splice(index, 1);
     renderGallery(itemId);
 }
@@ -335,7 +338,7 @@ function saveToLocalStorage() {
             label: item.label,
             status: item.status,
             observation: item.observation,
-            photoCount: item.photos.length,
+            photos: item.photos.slice(),
         })),
         completedAt: new Date().toISOString(),
     };
@@ -584,9 +587,6 @@ async function exportPDF() {
 }
 function cleanupPhotos() {
     for (const item of INSPECT_ITEMS) {
-        for (const url of item.photos) {
-            URL.revokeObjectURL(url);
-        }
         item.photos = [];
         item.observation = '';
     }
@@ -699,6 +699,7 @@ function loadInspection(id) {
         if (item) {
             item.status = savedItem.status;
             item.observation = savedItem.observation;
+            item.photos = savedItem.photos.slice();
         }
     }
     const nameInput = document.getElementById('posto-name');
@@ -811,18 +812,18 @@ function handleObservationChange(e) {
     if (item)
         item.observation = textarea.value;
 }
-function handleCameraCapture(e) {
+async function handleCameraCapture(e) {
     const input = e.target;
     if (!input.files || !input.files.length)
         return;
-    addPhotos(photoTargetId, input.files);
+    await addPhotos(photoTargetId, input.files);
     input.value = '';
 }
-function handleGallerySelect(e) {
+async function handleGallerySelect(e) {
     const input = e.target;
     if (!input.files || !input.files.length)
         return;
-    addPhotos(photoTargetId, input.files);
+    await addPhotos(photoTargetId, input.files);
     input.value = '';
 }
 /* ─── Init ─── */
