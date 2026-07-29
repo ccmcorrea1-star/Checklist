@@ -8,7 +8,7 @@ const ASSETS = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  './node_modules/jspdf/dist/jspdf.umd.min.js',
+  './vendor/jspdf.umd.min.js',
 ];
 
 self.addEventListener('install', (event) => {
