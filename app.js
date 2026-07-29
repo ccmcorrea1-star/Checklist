@@ -586,6 +586,7 @@ async function exportPDF() {
     a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
+    doc.save(filename);
 }
 function cleanupPhotos() {
     for (const item of INSPECT_ITEMS) {

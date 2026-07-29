@@ -696,6 +696,8 @@ async function exportPDF(): Promise<void> {
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+  doc.save(filename);
 }
 
 function cleanupPhotos(): void {
