@@ -507,7 +507,7 @@ async function exportPDF() {
         if (imgs.length > 0) {
             let px = margin + 8;
             let py = y;
-            const maxDim = 36;
+            const maxDim = 52;
             const gap = 4;
             for (let j = 0; j < imgs.length; j++) {
                 const img = imgs[j];
