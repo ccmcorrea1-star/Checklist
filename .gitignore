@@ -1,5 +1,4 @@
 node_modules/
-.agents/
 
 # Build and test output
 dist/
