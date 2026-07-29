@@ -622,6 +622,17 @@ function resetInspection() {
         finishBtn.className = 'btn btn-done';
     }
 }
+function deleteInspection(id) {
+    if (!confirm('Excluir esta inspe\u00e7\u00e3o permanentemente?'))
+        return;
+    const stored = localStorage.getItem('inspections');
+    if (!stored)
+        return;
+    const inspections = JSON.parse(stored);
+    localStorage.setItem('inspections', JSON.stringify(inspections.filter((i) => i.id !== id)));
+    showToast('Inspe\u00e7\u00e3o exclu\u00edda');
+    renderHistory();
+}
 function renderHistory() {
     const container = document.getElementById('history-screen')?.querySelector('.screen-content');
     if (!container)
@@ -661,8 +672,13 @@ function renderHistory() {
       </div>
       <div class="history-card-footer">
         <small>Salvo em ${dd}/${mo}/${yy} \u00e0s ${hh}:${mm}</small>
+        <button class="delete-btn" data-action="delete">Excluir</button>
       </div>
     `;
+        card.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteInspection(insp.id);
+        });
         card.addEventListener('click', () => loadInspection(insp.id));
         container.appendChild(card);
     }
